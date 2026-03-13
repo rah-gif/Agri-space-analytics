@@ -1,42 +1,43 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
+// Initialize Supabase with the Service Role Key for secure server-side insertion
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
 export async function POST(req: Request) {
   try {
-    // 1. Receive the farmer's details from the frontend
-    const { name, phone, geojson } = await req.json();
+    const body = await req.json();
+    const { name, land_name, phone, geojson } = body;
 
-    // 2. Initialize the secure Supabase connection using your new keys
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!; // The master key!
-    
-    if (!supabaseUrl || !supabaseKey) {
-        return NextResponse.json({ error: 'Database keys missing' }, { status: 500 });
+    // Validate incoming data
+    if (!name || !land_name || !phone || !geojson) {
+      return NextResponse.json({ success: false, error: 'Missing required fields' }, { status: 400 });
     }
 
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    // 3. Insert the data into your 'farms' table
+    // Insert the new farm into the 'farms' table
     const { data, error } = await supabase
       .from('farms')
       .insert([
         { 
           farmer_name: name, 
+          land_name: land_name, // NEW: Adding the specific land name
           phone_number: phone, 
           polygon_data: geojson 
         }
-      ]);
+      ])
+      .select();
 
     if (error) {
-        console.error("Supabase rejection:", error);
-        return NextResponse.json({ error: 'Failed to save to database' }, { status: 400 });
+      console.error('Supabase Insert Error:', error);
+      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
 
-    // 4. Send success back to the dashboard
-    return NextResponse.json({ success: true, message: 'Farm secured in the vault!' });
+    return NextResponse.json({ success: true, data });
 
-  } catch (error) {
-    console.error("Server Error:", error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  } catch (error: any) {
+    console.error('Registration API Error:', error);
+    return NextResponse.json({ success: false, error: 'Server error' }, { status: 500 });
   }
 }
