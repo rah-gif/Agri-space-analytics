@@ -110,18 +110,17 @@ export default function Home() {
               <input
                 type="text"
                 placeholder="Farmer Name (e.g. Amara)"
-                className="... bg-white text-slate-900 placeholder:text-slate-400 ..."
+                className="flex-1 px-4 py-3 rounded-xl border border-slate-300 bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
                 value={farmerName}
                 onChange={(e) => setFarmerName(e.target.value)}
               />
               <input
                 type="tel"
                 placeholder="WhatsApp Number (e.g. +9477...)"
-                className="... bg-white text-slate-900 placeholder:text-slate-400 ..."
+                className="flex-1 px-4 py-3 rounded-xl border border-slate-300 bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
                 value={phoneNumber}
                 onChange={(e) => setPhoneNumber(e.target.value)}
               />
-
               <button
                 onClick={handleRegisterFarm}
                 disabled={isRegistering}
