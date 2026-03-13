@@ -17,82 +17,79 @@ export async function GET() {
 
     let alertsSent = 0;
 
- for (const farm of farms) {
-      // ARCHITECT FIX: Extract coordinates safely from the JSONB object
-      const geoData = farm.polygon_data;
-      const coordinates = geoData?.coordinates;
+for (const farm of farms) {
+      try {
+        // 1. DATA PARSING FIX
+        // If Supabase sends a string, we parse it. If it's already an object, we use it.
+        const geoData = typeof farm.polygon_data === 'string' 
+          ? JSON.parse(farm.polygon_data) 
+          : farm.polygon_data;
 
-      if (!coordinates || !coordinates[0] || !coordinates[0][0]) {
-        console.error(`Skipping farm ${farm.id}: Coordinates not found in polygon_data`);
-        continue; 
-      }
+        const coordinates = geoData?.coordinates;
 
-      // Now we safely grab the lon/lat
-      const [lon, lat] = coordinates[0][0];
-      
-      console.log(`Analyzing farm: ${farm.farmer_name} at ${lat}, ${lon}`);
-
-      // A. Fetch Weather - KEEP THE REST OF YOUR UPDATED HTTPS CODE BELOW...
-
-      // A. Fetch Weather - UPDATED TO HTTPS
-      const weatherRes = await fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${AGRO_KEY}`);
-      const weatherData = await weatherRes.json();
-      
-      let willRain = false;
-      if (weatherData.list) {
-        const next24Hours = weatherData.list.slice(0, 8);
-        willRain = next24Hours.some((block: any) => block.weather[0].main === 'Rain');
-      }
-
-      // B. Fetch Soil Data - UPDATED TO HTTPS + Safety Check
-      const polyRes = await fetch(`https://api.agromonitoring.com/agro/1.0/polygons?appid=${AGRO_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: `Farm_${farm.id}`, geo_json: { type: "Feature", properties: {}, geometry: farm.polygon_data } })
-      });
-      const polyData = await polyRes.json();
-      
-      if (!polyData.id) {
-          console.error(`Skipping farm ${farm.id}: No Polygon ID returned from Agro API`);
+        if (!coordinates || !coordinates[0] || !coordinates[0][0]) {
+          console.error(`Farm ${farm.id} has invalid coordinates structure.`);
           continue; 
+        }
+
+        const [lon, lat] = coordinates[0][0];
+        console.log(`🚀 Processing ${farm.farmer_name} at ${lat}, ${lon}`);
+
+        // A. Fetch Weather
+        const weatherRes = await fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${AGRO_KEY}`);
+        const weatherData = await weatherRes.json();
+        
+        let willRain = false;
+        if (weatherData.list) {
+          const next24Hours = weatherData.list.slice(0, 8);
+          willRain = next24Hours.some((block: any) => block.weather[0].main === 'Rain');
+        }
+
+        // B. Fetch Soil Data - Ensure GeoJSON Feature format is perfect
+        const polyRes = await fetch(`https://api.agromonitoring.com/agro/1.0/polygons?appid=${AGRO_KEY}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            name: `Farm_${farm.id}`, 
+            geo_json: { 
+              type: "Feature", 
+              properties: {}, 
+              geometry: geoData // Use the parsed data here
+            } 
+          })
+        });
+        const polyData = await polyRes.json();
+        
+        if (!polyData.id) {
+            console.error(`Agro API Error for ${farm.farmer_name}:`, polyData);
+            continue; 
+        }
+
+        const soilRes = await fetch(`https://api.agromonitoring.com/agro/1.0/soil?polyid=${polyData.id}&appid=${AGRO_KEY}`);
+        const soilData = await soilRes.json();
+        const surfaceTempC = soilData.t0 ? (soilData.t0 - 273.15).toFixed(1) : "N/A";
+
+        // C. AI Generation
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const prompt = `Write a short agricultural WhatsApp alert for farmer ${farm.farmer_name}. 
+          Soil Moisture: ${soilData.moisture || 'Unknown'}. Temp: ${surfaceTempC}°C. Rain: ${willRain ? 'Yes' : 'No'}. 
+          Provide advice in natural Sinhala first, then English. Use emojis.`;
+
+        const aiResponse = await model.generateContent(prompt);
+        const aiMessage = aiResponse.response.text();
+
+        // D. Send WhatsApp
+        await twilioClient.messages.create({
+          body: aiMessage,
+          from: process.env.TWILIO_WHATSAPP_NUMBER,
+          to: farm.phone_number
+        });
+
+        alertsSent++;
+      } catch (innerError) {
+        console.error(`Error processing farm ${farm.id}:`, innerError);
       }
-
-      const soilRes = await fetch(`https://api.agromonitoring.com/agro/1.0/soil?polyid=${polyData.id}&appid=${AGRO_KEY}`);
-      const soilData = await soilRes.json();
-      const surfaceTempC = soilData.t0 ? (soilData.t0 - 273.15).toFixed(1) : "N/A";
-
-      // C. AI Generation
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-      const prompt = `
-        You are an expert agricultural AI assistant in Sri Lanka. 
-        Analyze live data for farmer ${farm.farmer_name}:
-        - Soil Moisture: ${soilData.moisture || 'Unknown'} m³/m³
-        - Surface Temp: ${surfaceTempC}°C
-        - Rain next 24h: ${willRain ? 'YES' : 'NO'}
-
-        Write a short WhatsApp message:
-        1. Natural Sinhala advice on irrigation/fertilizer.
-        2. Short English translation below.
-        Keep it concise. Use emojis.
-      `;
-
-      const aiResponse = await model.generateContent(prompt);
-      const aiMessage = aiResponse.response.text();
-
-      // D. Send WhatsApp
-      await twilioClient.messages.create({
-        body: aiMessage,
-        from: process.env.TWILIO_WHATSAPP_NUMBER,
-        to: farm.phone_number
-      });
-
-      alertsSent++;
     }
-
-    return NextResponse.json({ success: true, message: `Alerts sent to ${alertsSent} farms.` });
-
-  } catch (error: any) {
-    console.error("CRON ENGINE ERROR:", error);
     // This will help us see the actual error in the browser window
     return NextResponse.json({ 
       error: 'System failure', 
