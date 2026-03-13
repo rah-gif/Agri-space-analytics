@@ -20,7 +20,7 @@ export async function GET() {
     }
 
     let alertsSent = 0;
-    let diagnostics = []; // This will track exactly what happens to each farm
+    let diagnostics = []; 
 
     for (const farm of farms) {
       try {
@@ -39,7 +39,7 @@ export async function GET() {
         const wData = await weatherRes.json();
         const willRain = wData.list?.slice(0, 8).some((b: any) => b.weather[0].main === 'Rain') || false;
 
-        // 2. Agro Polygon Test
+        // 2. Agro Polygon Test (WITH SMART ID RECOVERY)
         const polyRes = await fetch(`https://api.agromonitoring.com/agro/1.0/polygons?appid=${AGRO_KEY}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -47,13 +47,23 @@ export async function GET() {
         });
         const pData = await polyRes.json();
         
-        if (!pData.id) {
+        let polyId = pData.id;
+
+        // THE PATCH: If Agro API blocks us for a duplicate, extract the existing ID from their error message!
+        if (!polyId && pData.name === "UnprocessableEntityError" && pData.message.includes("duplicated")) {
+          const match = pData.message.match(/'([^']+)'/);
+          if (match && match[1]) {
+            polyId = match[1]; // Grab the ID cleanly out of the string
+          }
+        }
+
+        if (!polyId) {
           diagnostics.push(`Farm ${farm.farmer_name}: Agro API failed. Response: ${JSON.stringify(pData)}`);
           continue;
         }
 
-        // 3. Agro Soil Test
-        const soilRes = await fetch(`https://api.agromonitoring.com/agro/1.0/soil?polyid=${pData.id}&appid=${AGRO_KEY}`);
+        // 3. Agro Soil Test (Using the safely recovered polyId)
+        const soilRes = await fetch(`https://api.agromonitoring.com/agro/1.0/soil?polyid=${polyId}&appid=${AGRO_KEY}`);
         const sData = await soilRes.json();
 
         // 4. Gemini AI Test
@@ -73,12 +83,10 @@ export async function GET() {
         diagnostics.push(`Farm ${farm.farmer_name}: SUCCESS! Message sent.`);
 
       } catch (innerErr: any) {
-        // If it crashes anywhere, this catches the exact reason
         diagnostics.push(`Farm ${farm.farmer_name} Exception: ${innerErr.message}`);
       }
     }
 
-    // Now returning the diagnostics array to the browser
     return NextResponse.json({ 
       success: true, 
       message: `Alerts sent to ${alertsSent} farms.`,
