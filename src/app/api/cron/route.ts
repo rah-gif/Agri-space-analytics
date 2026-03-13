@@ -17,8 +17,22 @@ export async function GET() {
 
     let alertsSent = 0;
 
-    for (const farm of farms) {
-      const [lon, lat] = farm.polygon_data.coordinates[0][0];
+ for (const farm of farms) {
+      // ARCHITECT FIX: Extract coordinates safely from the JSONB object
+      const geoData = farm.polygon_data;
+      const coordinates = geoData?.coordinates;
+
+      if (!coordinates || !coordinates[0] || !coordinates[0][0]) {
+        console.error(`Skipping farm ${farm.id}: Coordinates not found in polygon_data`);
+        continue; 
+      }
+
+      // Now we safely grab the lon/lat
+      const [lon, lat] = coordinates[0][0];
+      
+      console.log(`Analyzing farm: ${farm.farmer_name} at ${lat}, ${lon}`);
+
+      // A. Fetch Weather - KEEP THE REST OF YOUR UPDATED HTTPS CODE BELOW...
 
       // A. Fetch Weather - UPDATED TO HTTPS
       const weatherRes = await fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${AGRO_KEY}`);
