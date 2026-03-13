@@ -66,7 +66,7 @@ export async function GET() {
         const soilData = await soilRes.json();
 
         // AI Advice
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
         const result = await model.generateContent(`Farmer: ${farm.farmer_name}. Rain: ${willRain}. Soil: ${soilData.moisture}. Write a 2-sentence WhatsApp alert in Sinhala and English.`);
         const aiMessage = result.response.text();
 
