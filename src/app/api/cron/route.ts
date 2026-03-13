@@ -60,7 +60,7 @@ export async function GET() {
         const sData = await soilRes.json();
 
         // 4. Gemini AI Test
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+        const model = genAI.getGenerativeModel({ model: "gemini-pro" });
         const prompt = `Context: Sri Lankan Farmer ${farm.farmer_name}. Soil Moisture: ${sData.moisture}. Rain: ${willRain}. Write a short WhatsApp alert in Sinhala then English.`;
         const result = await model.generateContent(prompt);
         const aiMsg = result.response.text();
