@@ -12,14 +12,15 @@ export default function Home() {
   
   // State for the Secure Registration Vault
   const [farmerName, setFarmerName] = useState('');
+  const [landName, setLandName] = useState(''); // NEW STATE FOR LAND NAME
   const [phoneNumber, setPhoneNumber] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
   const [regStatus, setRegStatus] = useState('');
 
   // Function to lock data into Supabase
   const handleRegisterFarm = async () => {
-    if (!farmerName || !phoneNumber) {
-      setRegStatus('⚠️ Please enter both name and WhatsApp number.');
+    if (!farmerName || !phoneNumber || !landName) { // Require landName
+      setRegStatus('⚠️ Please enter name, land name, and WhatsApp number.');
       return;
     }
 
@@ -32,8 +33,9 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: farmerName,
+          land_name: landName, // PASS THE NEW DATA
           phone: phoneNumber,
-          geojson: farmData.rawGeojson // Grabbing the exact shape drawn on the map
+          geojson: farmData.rawGeojson 
         })
       });
 
@@ -42,6 +44,7 @@ export default function Home() {
       if (data.success) {
         setRegStatus('✅ Farm successfully secured! Automation ready.');
         setFarmerName(''); 
+        setLandName(''); // Clear the field
         setPhoneNumber('');
       } else {
         setRegStatus('❌ Failed to save. Check database connection.');
@@ -103,10 +106,10 @@ export default function Home() {
               🤖 Automate this Farm
             </h2>
             <p className="text-slate-600 mb-6 text-sm md:text-base">
-              Enter details to receive daily AI-powered WhatsApp alerts for this specific plot of land. We will monitor the soil and weather for you.
+              Enter details to receive daily AI-powered WhatsApp alerts for this specific plot of land.
             </p>
             
-            <div className="flex flex-col md:flex-row gap-4">
+            <div className="flex flex-col md:flex-row gap-4 mb-4">
               <input
                 type="text"
                 placeholder="Farmer Name (e.g. Amara)"
@@ -114,9 +117,16 @@ export default function Home() {
                 value={farmerName}
                 onChange={(e) => setFarmerName(e.target.value)}
               />
+               <input
+                type="text"
+                placeholder="Land Name (e.g. Mango Orchard)"
+                className="flex-1 px-4 py-3 rounded-xl border border-slate-300 bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+                value={landName}
+                onChange={(e) => setLandName(e.target.value)}
+              />
               <input
                 type="tel"
-                placeholder="WhatsApp Number (e.g. +9477...)"
+                placeholder="WhatsApp (+94...)"
                 className="flex-1 px-4 py-3 rounded-xl border border-slate-300 bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
                 value={phoneNumber}
                 onChange={(e) => setPhoneNumber(e.target.value)}
@@ -126,12 +136,12 @@ export default function Home() {
                 disabled={isRegistering}
                 className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-xl shadow-md transition-all disabled:opacity-50 whitespace-nowrap"
               >
-                {isRegistering ? 'Locking Vault...' : 'Save & Automate'}
+                {isRegistering ? 'Locking...' : 'Save & Automate'}
               </button>
             </div>
             
             {regStatus && (
-              <p className={`mt-4 text-sm font-semibold ${regStatus.includes('✅') ? 'text-green-600' : regStatus.includes('❌') ? 'text-red-600' : 'text-blue-600'}`}>
+              <p className={`mt-2 text-sm font-semibold ${regStatus.includes('✅') ? 'text-green-600' : regStatus.includes('❌') ? 'text-red-600' : 'text-blue-600'}`}>
                 {regStatus}
               </p>
             )}
