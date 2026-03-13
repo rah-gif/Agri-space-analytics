@@ -3,26 +3,24 @@ import { createClient } from '@supabase/supabase-js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import twilio from 'twilio';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
-    // 1. Initialize all our API Engines
     const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-    const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+    const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
     const AGRO_KEY = process.env.AGRO_API_KEY;
 
-    // 2. Fetch EVERY registered farm from our secure vault
-    const { data: farms, error } = await supabase.from('farms').select('*');
-    if (error || !farms) return NextResponse.json({ error: 'Failed to read database' }, { status: 500 });
+    const { data: farms, error: dbError } = await supabase.from('farms').select('*');
+    if (dbError || !farms) throw new Error(`Database Error: ${dbError?.message}`);
 
     let alertsSent = 0;
 
-    // 3. Loop through the farms and process them one by one
-// 3. Loop through the farms and process them one by one
     for (const farm of farms) {
       const [lon, lat] = farm.polygon_data.coordinates[0][0];
 
-      // A. Fetch Weather Data
+      // A. Fetch Weather - UPDATED TO HTTPS
       const weatherRes = await fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${AGRO_KEY}`);
       const weatherData = await weatherRes.json();
       
@@ -32,40 +30,42 @@ export async function GET() {
         willRain = next24Hours.some((block: any) => block.weather[0].main === 'Rain');
       }
 
-      // B. Fetch Soil Data using the polygon ID (assuming you saved it, or using coordinates)
-      // *Note: For this to work perfectly, ensure you saved the OpenWeather 'polyId' in Supabase!*
-      // For now, let's pass the raw polygon coordinates to the API to get instant soil data
-      const polyRes = await fetch(`http://api.agromonitoring.com/agro/1.0/polygons?appid=${AGRO_KEY}`, {
+      // B. Fetch Soil Data - UPDATED TO HTTPS + Safety Check
+      const polyRes = await fetch(`https://api.agromonitoring.com/agro/1.0/polygons?appid=${AGRO_KEY}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: "Daily_Check", geo_json: farm.polygon_data })
+        body: JSON.stringify({ name: `Farm_${farm.id}`, geo_json: { type: "Feature", properties: {}, geometry: farm.polygon_data } })
       });
       const polyData = await polyRes.json();
       
-      const soilRes = await fetch(`http://api.agromonitoring.com/agro/1.0/soil?polyid=${polyData.id}&appid=${AGRO_KEY}`);
-      const soilData = await soilRes.json();
-      const surfaceTempC = (soilData.t0 - 273.15).toFixed(1);
+      if (!polyData.id) {
+          console.error(`Skipping farm ${farm.id}: No Polygon ID returned from Agro API`);
+          continue; 
+      }
 
-      
-      // C. The Upgraded AI Prompt (Full Data Analysis)
+      const soilRes = await fetch(`https://api.agromonitoring.com/agro/1.0/soil?polyid=${polyData.id}&appid=${AGRO_KEY}`);
+      const soilData = await soilRes.json();
+      const surfaceTempC = soilData.t0 ? (soilData.t0 - 273.15).toFixed(1) : "N/A";
+
+      // C. AI Generation
       const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
       const prompt = `
         You are an expert agricultural AI assistant in Sri Lanka. 
-        Analyze this live satellite data for farmer ${farm.farmer_name}'s land:
-        - Soil Moisture: ${soilData.moisture} m³/m³ (Optimal is 0.25 to 0.35)
-        - Surface Temperature: ${surfaceTempC}°C
-        - Rain Expected in next 24h: ${willRain ? 'YES' : 'NO'}
+        Analyze live data for farmer ${farm.farmer_name}:
+        - Soil Moisture: ${soilData.moisture || 'Unknown'} m³/m³
+        - Surface Temp: ${surfaceTempC}°C
+        - Rain next 24h: ${willRain ? 'YES' : 'NO'}
 
-        Write a short, urgent WhatsApp message to the farmer. 
-        1. Explain the current soil and heat conditions simply.
-        2. Give strict advice on irrigation and fertilizer based on this data combination.
-        Write it FIRST in natural Sinhala, and then underneath, a short English translation. Use emojis.
+        Write a short WhatsApp message:
+        1. Natural Sinhala advice on irrigation/fertilizer.
+        2. Short English translation below.
+        Keep it concise. Use emojis.
       `;
 
       const aiResponse = await model.generateContent(prompt);
       const aiMessage = aiResponse.response.text();
 
-      // D. Fire the AI-generated message
+      // D. Send WhatsApp
       await twilioClient.messages.create({
         body: aiMessage,
         from: process.env.TWILIO_WHATSAPP_NUMBER,
@@ -75,10 +75,14 @@ export async function GET() {
       alertsSent++;
     }
 
-    return NextResponse.json({ success: true, message: `Successfully automated ${alertsSent} farm alerts!` });
+    return NextResponse.json({ success: true, message: `Alerts sent to ${alertsSent} farms.` });
 
-  } catch (error) {
-    console.error("Cron Engine Error:", error);
-    return NextResponse.json({ error: 'System failure' }, { status: 500 });
+  } catch (error: any) {
+    console.error("CRON ENGINE ERROR:", error);
+    // This will help us see the actual error in the browser window
+    return NextResponse.json({ 
+      error: 'System failure', 
+      details: error.message 
+    }, { status: 500 });
   }
 }
