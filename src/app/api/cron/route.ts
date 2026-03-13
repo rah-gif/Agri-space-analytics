@@ -17,10 +17,8 @@ export async function GET() {
 
     let alertsSent = 0;
 
-for (const farm of farms) {
+    for (const farm of farms) {
       try {
-        // 1. DATA PARSING FIX
-        // If Supabase sends a string, we parse it. If it's already an object, we use it.
         const geoData = typeof farm.polygon_data === 'string' 
           ? JSON.parse(farm.polygon_data) 
           : farm.polygon_data;
@@ -33,9 +31,7 @@ for (const farm of farms) {
         }
 
         const [lon, lat] = coordinates[0][0];
-        console.log(`🚀 Processing ${farm.farmer_name} at ${lat}, ${lon}`);
 
-        // A. Fetch Weather
         const weatherRes = await fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${AGRO_KEY}`);
         const weatherData = await weatherRes.json();
         
@@ -45,31 +41,22 @@ for (const farm of farms) {
           willRain = next24Hours.some((block: any) => block.weather[0].main === 'Rain');
         }
 
-        // B. Fetch Soil Data - Ensure GeoJSON Feature format is perfect
         const polyRes = await fetch(`https://api.agromonitoring.com/agro/1.0/polygons?appid=${AGRO_KEY}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
             name: `Farm_${farm.id}`, 
-            geo_json: { 
-              type: "Feature", 
-              properties: {}, 
-              geometry: geoData // Use the parsed data here
-            } 
+            geo_json: { type: "Feature", properties: {}, geometry: geoData } 
           })
         });
         const polyData = await polyRes.json();
         
-        if (!polyData.id) {
-            console.error(`Agro API Error for ${farm.farmer_name}:`, polyData);
-            continue; 
-        }
+        if (!polyData.id) continue; 
 
         const soilRes = await fetch(`https://api.agromonitoring.com/agro/1.0/soil?polyid=${polyData.id}&appid=${AGRO_KEY}`);
         const soilData = await soilRes.json();
         const surfaceTempC = soilData.t0 ? (soilData.t0 - 273.15).toFixed(1) : "N/A";
 
-        // C. AI Generation
         const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
         const prompt = `Write a short agricultural WhatsApp alert for farmer ${farm.farmer_name}. 
           Soil Moisture: ${soilData.moisture || 'Unknown'}. Temp: ${surfaceTempC}°C. Rain: ${willRain ? 'Yes' : 'No'}. 
@@ -78,7 +65,6 @@ for (const farm of farms) {
         const aiResponse = await model.generateContent(prompt);
         const aiMessage = aiResponse.response.text();
 
-        // D. Send WhatsApp
         await twilioClient.messages.create({
           body: aiMessage,
           from: process.env.TWILIO_WHATSAPP_NUMBER,
@@ -90,7 +76,12 @@ for (const farm of farms) {
         console.error(`Error processing farm ${farm.id}:`, innerError);
       }
     }
-    // This will help us see the actual error in the browser window
+
+    // SUCCESS RETURN (Must be inside try, after the loop)
+    return NextResponse.json({ success: true, message: `Alerts sent to ${alertsSent} farms.` });
+
+  } catch (error: any) {
+    // ERROR RETURN (Must be inside catch)
     return NextResponse.json({ 
       error: 'System failure', 
       details: error.message 
