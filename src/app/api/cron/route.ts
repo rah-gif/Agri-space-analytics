@@ -66,12 +66,13 @@ export async function GET() {
         const aiMsg = result.response.text();
 
         // 5. Twilio Test
+       // 5. Twilio Test
         await twilioClient.messages.create({
           body: aiMsg,
           from: process.env.TWILIO_WHATSAPP_NUMBER,
-          to: farm.phone_number
+          to: `whatsapp:${farm.phone_number}` // Automatically formats it for the WhatsApp channel!
         });
-
+        
         alertsSent++;
         diagnostics.push(`Farm ${farm.farmer_name}: SUCCESS! Message sent.`);
 
