@@ -39,26 +39,19 @@ export async function GET() {
         const wData = await weatherRes.json();
         const willRain = wData.list?.slice(0, 8).some((b: any) => b.weather[0].main === 'Rain') || false;
 
-        // 2. Agro Polygon Test (WITH SMART ID RECOVERY)
-        const polyRes = await fetch(`https://api.agromonitoring.com/agro/1.0/polygons?appid=${AGRO_KEY}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: `F_${farm.id}`, geo_json: { type: "Feature", properties: {}, geometry: geoData } })
-        });
-        const pData = await polyRes.json();
+        // 2. Agro Polygon Test (THE 'READ-ONLY' FIX)
+        // Instead of creating a new polygon, we fetch the ones you already own!
+        const polyListRes = await fetch(`https://api.agromonitoring.com/agro/1.0/polygons?appid=${AGRO_KEY}`);
+        const polyList = await polyListRes.json();
         
-        let polyId = pData.id;
-
-        // THE PATCH: If Agro API blocks us for a duplicate, extract the existing ID from their error message!
-        if (!polyId && pData.name === "UnprocessableEntityError" && pData.message.includes("duplicated")) {
-          const match = pData.message.match(/'([^']+)'/);
-          if (match && match[1]) {
-            polyId = match[1]; // Grab the ID cleanly out of the string
-          }
+        let polyId;
+        if (polyList && polyList.length > 0) {
+          // Grab the ID of the first polygon in your account
+          polyId = polyList[0].id;
         }
 
         if (!polyId) {
-          diagnostics.push(`Farm ${farm.farmer_name}: Agro API failed. Response: ${JSON.stringify(pData)}`);
+          diagnostics.push(`Farm ${farm.farmer_name}: Agro API failed. Limit reached and no existing polygons found.`);
           continue;
         }
 
@@ -67,7 +60,7 @@ export async function GET() {
         const sData = await soilRes.json();
 
         // 4. Gemini AI Test
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
         const prompt = `Context: Sri Lankan Farmer ${farm.farmer_name}. Soil Moisture: ${sData.moisture}. Rain: ${willRain}. Write a short WhatsApp alert in Sinhala then English.`;
         const result = await model.generateContent(prompt);
         const aiMsg = result.response.text();
